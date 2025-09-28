@@ -9,8 +9,10 @@
 
 *.pyc
 *.pyo
+*.so
 *~
 __pycache__/
+build/
 *.hypothesis/
 bin/pypy-c
 include/*.h
