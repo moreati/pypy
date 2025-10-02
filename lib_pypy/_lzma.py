@@ -436,10 +436,17 @@ class LZMADecompressor(object):
     this should be a sequence of dicts, each indicating the ID and options
     for a single filter.
 
+    threads (if provided) should be None or an integer >= 0. A value of None
+    will perform single threaded compression. A value >= 0 will perform
+    multithreaded compression, 0 will automatically allocate as many threads
+    as the system can support. Note that a value of 1 will still run in
+    multithreaded mode.
+
     For one-shot decompression, use the decompress() function instead.
     """
     def __init__(self, format=FORMAT_AUTO, memlimit=None, filters=None,
-                 header=None, check=None, unpadded_size=None):
+                 header=None, check=None, unpadded_size=None, threads=None,
+                 ):
         decoder_flags = m.LZMA_TELL_ANY_CHECK | m.LZMA_TELL_NO_CHECK
         if memlimit is not None:
             if format == FORMAT_RAW:
@@ -459,6 +466,9 @@ class LZMADecompressor(object):
             raise ValueError("Cannot specify header, unpadded_size or check "
                              "except with FORMAT_BLOCK")
 
+        if format != FORMAT_XZ and threads is not None:
+            raise ValueError("Multithreaded mode is only supported by FORMAT_XZ")
+
         format = _parse_format(format)
         self.lock = threading.Lock()
         self.check = CHECK_UNKNOWN
@@ -470,6 +480,17 @@ class LZMADecompressor(object):
         self._input_buffer = ffi.NULL
         self._input_buffer_size = 0
 
+        # Multithreaded mode
+        if format == FORMAT_XZ and isinstance(threads, int):
+            mt = ffi.new('lzma_mt*')
+            mt.flags = decoder_flags
+            mt.threads = parse_threads(threads)
+            mt.memlimit_threading = memlimit
+            mt.memlimit_stop = memlimit
+            catch_lzma_error(m.lzma_stream_decoder_mt, mt)
+            return
+
+        # Singlethreaded mode
         if format == FORMAT_AUTO:
             catch_lzma_error(m.lzma_auto_decoder, self.lzs, memlimit, decoder_flags)
         elif format == FORMAT_XZ:

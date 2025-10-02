@@ -154,6 +154,7 @@ uint32_t lzma_cputhreads(void);  // TODO lzma_nothrow?
 // Encoder/Decoder
 int lzma_auto_decoder(lzma_stream *strm, uint64_t memlimit, uint32_t flags);
 int lzma_stream_decoder(lzma_stream *strm, uint64_t memlimit, uint32_t flags);
+int lzma_stream_decoder_mt(lzma_stream *strm, const lzma_mt *options);
 int lzma_alone_decoder(lzma_stream *strm, uint64_t memlimit);
 int lzma_raw_decoder(lzma_stream *strm, const lzma_filter *filters);
 int lzma_block_decoder(lzma_stream *strm, lzma_block *block);
