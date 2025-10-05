@@ -26,7 +26,7 @@ pypy/doc/discussion/*.html
 pypy/module/cpyext/src/*.o
 pypy/module/cpyext/test/*.o
 pypy/module/test_lib_pypy/ctypes_tests/*.o
-pypy/goal/pypy-c
+pypy/goal/pypy*-c
 pypy/goal/pypy*.exe
 pypy/goal/target*-c
 pypy/goal/*.dll

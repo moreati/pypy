@@ -462,6 +462,12 @@ class LZMADecompressor(object):
 
     For one-shot decompression, use the decompress() function instead.
     """
+
+    _MEMUSAGE_ERROR_VALUES = {
+        m.lzma_memusage: 0,
+        m.lzma_raw_decoder_memusage: m.UINT64_MAX,
+    }
+
     def __init__(self, format=FORMAT_AUTO, memlimit=None, filters=None,
                  header=None, check=None, unpadded_size=None):
         decoder_flags = m.LZMA_TELL_ANY_CHECK | m.LZMA_TELL_NO_CHECK
@@ -496,16 +502,20 @@ class LZMADecompressor(object):
 
         if format == FORMAT_AUTO:
             catch_lzma_error(m.lzma_auto_decoder, self.lzs, memlimit, decoder_flags)
+            self._lzs_memusage = self._memusage(m.lzma_memusage, self.lzs)
         elif format == FORMAT_XZ:
             catch_lzma_error(m.lzma_stream_decoder, self.lzs, memlimit, decoder_flags)
+            self._lzs_memusage = self._memusage(m.lzma_memusage, self.lzs)
         elif format == FORMAT_ALONE:
             self.check = CHECK_NONE
             catch_lzma_error(m.lzma_alone_decoder, self.lzs, memlimit)
+            self._lzs_memusage = self._memusage(m.lzma_memusage, self.lzs)
         elif format == FORMAT_RAW:
             self.check = CHECK_NONE
             filters = parse_filter_chain_spec(filters)
             catch_lzma_error(m.lzma_raw_decoder, self.lzs,
                 filters)
+            self._lzs_memusage = self._memusage(m.lzma_raw_decoder_memusage, filters)
         elif format == FORMAT_BLOCK:
             self.__block = block = ffi.new('lzma_block*')
             block.version = 0
@@ -518,8 +528,23 @@ class LZMADecompressor(object):
                 catch_lzma_error(m.lzma_block_compressed_size, block, unpadded_size)
             self.expected_size = block.compressed_size
             catch_lzma_error(m.lzma_block_decoder, self.lzs, block)
+            self._lzs_memusage = self._memusage(m.lzma_raw_decoder_memusage, block.filters)
         else:
             raise ValueError("invalid container format: %s" % format)
+
+        __pypy__.add_memory_pressure(self._lzs_memusage)
+
+    @classmethod
+    def _memusage(cls, fn, *args):
+        try:
+            memusage_error_value = cls._MEMUSAGE_ERROR_VALUES[fn]
+        except KeyError:
+            raise LZMAError("Unknown memusage function: %r" % (fn,))
+
+        memusage = fn(*args)
+        if memusage == memusage_error_value:
+            raise LZMAError("Memusage function %r returned %d" % (fn, memusage))
+        return memusage
 
     def pre_decompress_left_data(self, buf, buf_size):
         # in this case there is data left that needs to be processed before the first
@@ -634,6 +659,8 @@ class LZMADecompressor(object):
                 if not used__input_buffer:
                     self.post_decompress_avail_data()
 
+            __pypy__.add_memory_pressure(-self._lzs_memusage)
+            _release_lzma_stream(self.lzs)
             return result
 
     def _decompress(self, buf, buf_len, max_length):
@@ -704,15 +731,6 @@ class LZMADecompressor(object):
                         self.__class__.__name__)
 
 
-# Issue #2579: Setting up the stream for encoding takes around 17MB of
-# RAM on my Linux 64 system.  So we call add_memory_pressure(17MB) when
-# we create the stream.  In flush(), we actively free the stream even
-# though we could just leave it to the GC (but 17MB is too much for
-# doing that sanely); at this point we call add_memory_pressure(-17MB)
-# to cancel the original increase.
-COMPRESSION_STREAM_SIZE = 1024*1024*17
-
-
 class LZMACompressor(object):
     """
     LZMACompressor(format=FORMAT_XZ, check=-1, preset=None, filters=None)
@@ -753,17 +771,18 @@ class LZMACompressor(object):
         self.lock = threading.Lock()
         self.flushed = 0
         self.lzs = _new_lzma_stream()
-        __pypy__.add_memory_pressure(COMPRESSION_STREAM_SIZE)
         if format == FORMAT_XZ:
             if filters is None:
                 if check == -1:
                     check = m.LZMA_CHECK_CRC64
                 catch_lzma_error(m.lzma_easy_encoder, self.lzs,
                     preset, check)
+                self._lzs_memusage = self._memusage(m.lzma_easy_encoder_memusage, preset)
             else:
                 filters = parse_filter_chain_spec(filters)
                 catch_lzma_error(m.lzma_stream_encoder, self.lzs,
                     filters, check)
+                self._lzs_memusage = self._memusage(m.lzma_raw_encoder_memusage, filters)
         elif format == FORMAT_ALONE:
             if filters is None:
                 options = ffi.new('lzma_options_lzma*')
@@ -771,6 +790,10 @@ class LZMACompressor(object):
                     raise LZMAError("Invalid compression preset: %s" % preset)
                 catch_lzma_error(m.lzma_alone_encoder, self.lzs,
                     options)
+                # TODO Probably close enough, but feels icky. Is there a away
+                #      to get the filter(s) of lzma_alone_encoder() to use
+                #      lzma_raw_encoder_memusage()?
+                self._lzs_memusage = self._memusage(m.lzma_easy_encoder_memusage, preset)
             else:
                 raise NotImplementedError
         elif format == FORMAT_RAW:
@@ -779,8 +802,17 @@ class LZMACompressor(object):
             filters = parse_filter_chain_spec(filters)
             catch_lzma_error(m.lzma_raw_encoder, self.lzs,
                 filters)
+            self._lzs_memusage = self._memusage(m.lzma_raw_encoder_memusage, filters)
         else:
             raise ValueError("invalid container format: %s" % format)
+        __pypy__.add_memory_pressure(self._lzs_memusage)
+
+    @classmethod
+    def _memusage(cls, fn, *args):
+        memusage = fn(*args)
+        if memusage == m.UINT64_MAX:
+            raise LZMAError("Memusage function %r returned %d" % (fn, memusage))
+        return memusage
 
     def compress(self, data):
         """
@@ -838,7 +870,7 @@ class LZMACompressor(object):
                 raise ValueError("Repeated call to flush()")
             self.flushed = 1
             result = self._compress(b'', action=m.LZMA_FINISH)
-            __pypy__.add_memory_pressure(-COMPRESSION_STREAM_SIZE)
+            __pypy__.add_memory_pressure(-self._lzs_memusage)
             _release_lzma_stream(self.lzs)
         return result
 

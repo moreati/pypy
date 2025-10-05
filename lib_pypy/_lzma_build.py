@@ -158,6 +158,12 @@ typedef struct {
 
 bool lzma_check_is_supported(int check);
 
+// Memory usage
+uint64_t lzma_easy_encoder_memusage(uint32_t preset);
+uint64_t lzma_memusage(const lzma_stream *strm);
+uint64_t lzma_raw_decoder_memusage(const lzma_filter *filters);
+uint64_t lzma_raw_encoder_memusage(const lzma_filter *filters);
+
 // Encoder/Decoder
 int lzma_auto_decoder(lzma_stream *strm, uint64_t memlimit, uint32_t flags);
 int lzma_stream_decoder(lzma_stream *strm, uint64_t memlimit, uint32_t flags);
