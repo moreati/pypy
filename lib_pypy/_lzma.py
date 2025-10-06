@@ -540,9 +540,11 @@ class LZMADecompressor(object):
             tmp = ffi.cast("uint8_t*",m.malloc(new_size))
             if tmp == ffi.NULL:
                 raise MemoryError
+            __pypy__.add_memory_pressure(new_size)
             ffi.memmove(tmp, lzs.next_in, lzs.avail_in)
             lzs.next_in = tmp
             m.free(self._input_buffer)
+            #__pypy__.add_memory_pressure(-self._input_buffer_size)
             self._input_buffer = tmp
             self._input_buffer_size = new_size
         elif avail_now < buf_size:
@@ -560,6 +562,7 @@ class LZMADecompressor(object):
         if self._input_buffer is not ffi.NULL and \
            self._input_buffer_size < lzs.avail_in:
             m.free(self._input_buffer)
+            #__pypy__.add_memory_pressure(-input_buffer_size)
             self._input_buffer = ffi.NONE
 
         # allocate if necessary
@@ -567,6 +570,7 @@ class LZMADecompressor(object):
             self._input_buffer = ffi.cast("uint8_t*",m.malloc(lzs.avail_in))
             if self._input_buffer == ffi.NULL:
                 raise MemoryError
+            __pypy__.add_memory_pressure(lzs.avail_in)
             self._input_buffer_size = lzs.avail_in
 
         ffi.memmove(self._input_buffer, lzs.next_in, lzs.avail_in)
@@ -576,6 +580,7 @@ class LZMADecompressor(object):
         # clean the buffer
         if self._input_buffer is not ffi.NULL:
             m.free(self._input_buffer)
+            #__pypy__.add_memory_pressure(-self._input_buffer_size)
             self._input_buffer = ffi.NULL
             self._input_buffer_size = 0
 
@@ -649,6 +654,7 @@ class LZMADecompressor(object):
         lzs.next_out = orig_out = m.malloc(bufsiz)
         if orig_out == ffi.NULL:
             raise MemoryError
+        __pypy__.add_memory_pressure(bufsiz)
 
         lzs.avail_out = bufsiz
 
